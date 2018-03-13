@@ -61,11 +61,6 @@
             <version>3.3.0.0</version>
         </dependency>
         <dependency>
-            <groupId>org.neo4j</groupId>
-            <artifactId>graph-algorithms-core</artifactId>
-            <version>3.3.0.0</version>
-        </dependency>
-        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>${slf4j.version}</version>
