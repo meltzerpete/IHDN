@@ -1,4 +1,4 @@
-package hgc;
+package ihdn;
 
 import javafx.util.Pair;
 import org.junit.Test;
@@ -6,9 +6,7 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.stream.Stream;
 
-import static org.junit.Assert.*;
-
-public class HGCTest {
+public class IHDNTest {
 
     @Test
     public void testReduce() throws Exception {

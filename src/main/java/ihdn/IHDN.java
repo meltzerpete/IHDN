@@ -1,6 +1,5 @@
-package hgc;
+package ihdn;
 
-import javafx.util.Pair;
 import org.neo4j.graphdb.*;
 import org.neo4j.graphdb.factory.GraphDatabaseFactory;
 import org.slf4j.Logger;
@@ -12,32 +11,32 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
-public class HGC<T> {
+public class IHDN {
 
-    private final static Logger log = LoggerFactory.getLogger(HGC.class);
+    private final static Logger log = LoggerFactory.getLogger(IHDN.class);
     private final GraphDatabaseService DB;
     private final ThreadLocalRandom random = ThreadLocalRandom.current();
     private final int iterationsPerMonitor;
     private final IterationMonitor iterationMonitor;
     private final double[] rootFilter;
-    private final HGFunction<T>[] hgFunctions;
-    private final Map<HGFunction<T>, String> hgFunctionNames;
+    private final IHDNFunction[] ihdnFunctions;
+    private final Map<IHDNFunction, String> hgFunctionNames;
     private final Map<String, VoteFunction> voteFunctions;
 
 
-    private HGC(
+    private IHDN(
             GraphDatabaseService DB,
             int iterationsPerMonitor,
             IterationMonitor iterationMonitor,
             double[] rootFilter,
-            HGFunction<T>[] hgFunctions,
-            Map<HGFunction<T>, String> hgFunctionNames,
+            IHDNFunction[] ihdnFunctions,
+            Map<IHDNFunction, String> hgFunctionNames,
             Map<String, VoteFunction> voteFunctions) {
         this.DB = DB;
         this.iterationsPerMonitor = iterationsPerMonitor;
         this.iterationMonitor = iterationMonitor;
         this.rootFilter = rootFilter;
-        this.hgFunctions = hgFunctions;
+        this.ihdnFunctions = ihdnFunctions;
         this.hgFunctionNames = hgFunctionNames;
         this.voteFunctions = voteFunctions;
     }
@@ -53,9 +52,11 @@ public class HGC<T> {
         int remaining = maxIterations;
 
         try (Transaction tx = DB.beginTx()) {
-            if (iterationMonitor != null) iterationMonitor.accept(iteration, this);
+            if (iterationMonitor != null) iterationMonitor.apply(iteration, this);
             tx.success();
         }
+
+        boolean finished = false;
 
         while (remaining > 0) {
             batchSize = Math.min(batchSize, remaining);
@@ -65,73 +66,63 @@ public class HGC<T> {
                 for (int i = 0; i < batchSize; i++) {
                     // compute here
 
-                    DB.findNodes(HGLabels.ROOT).stream().forEach(node -> compute(new HGNode(this, node), rootFilter));
+                    DB.findNodes(IHDNLabels.ROOT).stream().forEach(node -> compute(new IHDNNode(this, node), rootFilter));
                     iteration++;
-                    if (iterationMonitor != null && iteration % iterationsPerMonitor == 0)
-                        iterationMonitor.accept(iteration, this);
+                    if (iterationMonitor != null && iteration % iterationsPerMonitor == 0) {
+                        finished = iterationMonitor.apply(iteration, this);
+                        if (finished) break;
+                    }
                 }
                 tx.success();
+                if (finished) break;
             }
         }
     }
 
-    private Pair<T, double[]> compute(HGNode hgNode, double[] parentFilter) {
-        if (!hgNode.isActive()) return null;
+    private double[] compute(IHDNNode ihdnNode, double[] parentFilter) {
+        if (!ihdnNode.isActive()) return null;
 
         // combine filter
-        double[] combined_filter = new double[hgFunctions.length];
-        double[] node_filter = hgNode.getFilter();
+        double[] combined_filter = new double[ihdnFunctions.length];
+        double[] node_filter = ihdnNode.getFilter();
 
         for (int i = 0; i < combined_filter.length; i++)
             combined_filter[i] = parentFilter[i] * node_filter[i];
 
         // compute children and collect votes
-        Pair<Stream<T>, Stream<double[]>> resultFromChildren = hgNode.getAllChildNodes()
+        Stream<double[]> childVotes = ihdnNode.getAllChildNodes()
                 .filter(hgNode1 -> !hgNode1.isDeleted())
                 .map(hgNode1 -> compute(hgNode1, combined_filter))
-                .filter(Objects::nonNull)
-                .map(tPair -> new Pair<>(Stream.of(tPair.getKey()), Stream.of(tPair.getValue())))
-                .reduce(new Pair<>(Stream.empty(), Stream.empty()),
-                        (acc, next) -> {
-                            // combine results
-                            Stream<T> resultStream = Stream.concat(acc.getKey(), next.getKey());
-                            // combine votes
-                            Stream<double[]> votesStream = Stream.concat(acc.getValue(), next.getValue());
-
-                            return new Pair<>(resultStream, votesStream);
-                        });
+                .filter(Objects::nonNull);
 
         // vote function
-        double[] vote = new double[hgFunctions.length];
-        VoteFunction voteFunction = hgNode.getVoteFunction();
-        if (voteFunction != null)
-            vote = voteFunction.apply(this, hgNode, resultFromChildren.getValue());
+        double[] vote = new double[ihdnFunctions.length];
+        VoteFunction voteFunction = ihdnNode.getVoteFunction();
+        vote = voteFunction.apply(this, ihdnNode, childVotes);
 
         for (int i = 0; i < combined_filter.length; i++)
             combined_filter[i] *= vote[i];
 
         // function to perform
-        T functionResult = null;
-
-        HGFunction<T> function = getHGFunction(combined_filter);
+        IHDNFunction function = getIHDNFunction(combined_filter);
         if (function == null) {
-            log.debug("No function to perform for node {}.", hgNode.getId());
+            log.debug("No function to perform for node {}.", ihdnNode.getId());
         } else {
-            log.debug("Performing function {} on node {}.", hgFunctionNames.get(function), hgNode.getId());
-            functionResult = function.apply(this, hgNode, resultFromChildren.getKey());
+            log.debug("Performing function {} on node {}.", hgFunctionNames.get(function), ihdnNode.getId());
+            function.accept(this, ihdnNode);
         }
 
         // node may now have deleted itself -> if so return null?
-        if (hgNode.isDeleted()) return null;
+        if (ihdnNode.isDeleted()) return null;
 
-        return new Pair<>(functionResult, vote);
+        return vote;
     }
 
     Map<String, VoteFunction> getVoteFunctions() {
         return this.voteFunctions;
     }
 
-    private HGFunction<T> getHGFunction(double[] filter) {
+    private IHDNFunction getIHDNFunction(double[] filter) {
         double sum = Arrays.stream(filter).sum();
         if (sum == 0) {
             // no possible function to perform
@@ -140,13 +131,13 @@ public class HGC<T> {
         double limit = random.nextDouble(sum);
         for (int i = 0; i < filter.length; i++) {
             limit -= filter[i];
-            if (limit < 0) return hgFunctions[i];
+            if (limit < 0) return ihdnFunctions[i];
         }
         throw new RuntimeException("Function selection overran.");
     }
 
     int getNumFunctions() {
-        return this.hgFunctions.length;
+        return this.ihdnFunctions.length;
     }
 
     public Result execute(String s) throws QueryExecutionException {
@@ -157,33 +148,34 @@ public class HGC<T> {
         return this.DB;
     }
 
-    public Stream<HGNode> getHGNodes(Label label) {
-        return DB.findNodes(label).stream().map(node -> new HGNode(this, node));
+    public Stream<IHDNNode> getIHDNNodes(Label label) {
+        return DB.findNodes(label).stream().map(node -> new IHDNNode(this, node));
     }
 
-    public Stream<HGNode> getActiveHGNodes(Label label) {
+    public Stream<IHDNNode> getActiveIHDNNodes(Label label) {
         return DB.findNodes(label).stream()
-                .filter(node -> !node.hasLabel(HGLabels.INACTIVE))
-                .map(node -> new HGNode(this, node));
+                .filter(node -> !node.hasLabel(IHDNLabels.INACTIVE))
+                .map(node -> new IHDNNode(this, node));
     }
 
     public int getCurrentIteration() {
         return iteration;
     }
-    public static class HGCBuilder<T> {
+
+    public static class IHDNBuilder {
 
         private GraphDatabaseService db;
         private int iterationsPerMonitor;
-        private IterationMonitor<T> iterationMonitor;
+        private IterationMonitor iterationMonitor;
         private double[] rootFilter;
-        private HGFunction<T>[] hgFunctions;
-        private Map<HGFunction<T>, String> hgFunctionNames;
+        private IHDNFunction[] ihdnFunctions;
+        private Map<IHDNFunction, String> hgFunctionNames;
         private Map<String, VoteFunction> voteFunctions;
         private String cypherStatement;
-        private GraphBuilder<T> graphBuilder;
+        private GraphBuilder graphBuilder;
         private double[] defaultVote;
 
-        public HGCBuilder<T> withExistingDB(String fileName) {
+        public IHDNBuilder withExistingDB(String fileName) {
             if (this.db != null) throw new RuntimeException("Must choose one from withExistingDB() and withNewDB()");
 
             File file = new File(fileName);
@@ -194,7 +186,7 @@ public class HGC<T> {
             return this;
         }
 
-        public HGCBuilder<T> withNewDB(String fileName) {
+        public IHDNBuilder withNewDB(String fileName) {
             if (this.db != null) throw new RuntimeException("Must choose one from withExistingDB() and withNewDB()");
 
             File file = new File(fileName);
@@ -205,61 +197,54 @@ public class HGC<T> {
             return this;
         }
 
-        public HGCBuilder<T> setIterationsPerMonitor(int iterationsPerMonitor) {
+        public IHDNBuilder setIterationsPerMonitor(int iterationsPerMonitor) {
             this.iterationsPerMonitor = iterationsPerMonitor;
             return this;
         }
 
-        public HGCBuilder<T> setIterationMonitor(IterationMonitor<T> iterationMonitor) {
+        public IHDNBuilder setIterationMonitor(IterationMonitor iterationMonitor) {
             this.iterationMonitor = iterationMonitor;
             return this;
         }
 
-        public HGCBuilder<T> setRootFilter(double[] rootFilter) {
+        public IHDNBuilder setRootFilter(double[] rootFilter) {
             this.rootFilter = rootFilter;
             return this;
         }
 
         private Simulation simulation;
 
-        public HGCBuilder<T> withSimulation(Simulation simulation) {
+        public IHDNBuilder withSimulation(Simulation simulation) {
             this.simulation = simulation;
             return this;
         }
 
-        public HGCBuilder<T> withGraphBuilder(GraphBuilder<T> graphBuilder) {
+        public IHDNBuilder withGraphBuilder(GraphBuilder graphBuilder) {
             this.graphBuilder = graphBuilder;
             return this;
         }
 
-        public HGCBuilder<T> withCypherStatement(String cypherStatement) {
-            if (cypherStatement != null) {
-                cypherStatement = cypherStatement.replaceAll("\\)-\\[:[^\\]]*\\]->\\(", ")-[:CONTAINS]->(");
-                cypherStatement = cypherStatement.replaceAll("\\)<-\\[:[^\\]]*\\]-\\(", ")<-[:CONTAINS]-(");
-                cypherStatement = cypherStatement.replaceAll("\\)->\\(", ")-[:CONTAINS]->(");
-                cypherStatement = cypherStatement.replaceAll("\\)<-\\(", ")<-[:CONTAINS]-(");
-                log.debug("Cypher graph builder statement replaced with:\n{}", cypherStatement);
-            }
+        public IHDNBuilder withCypherStatement(String cypherStatement) {
             this.cypherStatement = cypherStatement;
             return this;
         }
 
-        public HGC<T> createHGC() {
+        public IHDN createIHDN() {
             try (Transaction tx = db.beginTx()) {
                 if (simulation == null) throw new RuntimeException("No simulation provided.");
 
                 // set up array of HGFunctions
-                List<HGFunction> hgFunctionList = new LinkedList<>();
+                List<IHDNFunction> ihdnFunctionList = new LinkedList<>();
                 hgFunctionNames = new HashMap<>();
                 voteFunctions = new HashMap<>();
 
                 try {
                     for (Field field : simulation.getClass().getDeclaredFields()) {
-                        if (field.getAnnotation(HGFunctionDefinition.class) != null) {
-                            if (field.getType().isAssignableFrom(HGFunction.class)) {
-                                HGFunction<T> thgFunction = (HGFunction<T>) field.get(simulation);
-                                hgFunctionList.add(thgFunction);
-                                hgFunctionNames.put(thgFunction, field.getName());
+                        if (field.getAnnotation(IHDNFunctionDefinition.class) != null) {
+                            if (field.getType().isAssignableFrom(IHDNFunction.class)) {
+                                IHDNFunction function = (IHDNFunction) field.get(simulation);
+                                ihdnFunctionList.add(function);
+                                hgFunctionNames.put(function, field.getName());
                             }
                         } else if (field.getAnnotation(VoteFunctionDefinition.class) != null) {
                             if (field.getType().isAssignableFrom(VoteFunction.class)) {
@@ -271,38 +256,38 @@ public class HGC<T> {
                     throw new RuntimeException(e);
                 }
 
-                if (hgFunctionList.isEmpty()) throw new RuntimeException("No HGFunctions provided.");
-                this.hgFunctions = hgFunctionList.toArray(new HGFunction[0]);
+                if (ihdnFunctionList.isEmpty()) throw new RuntimeException("No HGFunctions provided.");
+                this.ihdnFunctions = ihdnFunctionList.toArray(new IHDNFunction[0]);
 
                 // default iterationsPerMonitor
                 if (iterationsPerMonitor == 0) iterationsPerMonitor = 1;
                 // default root filter
                 if (rootFilter == null) {
-                    rootFilter = new double[hgFunctions.length];
+                    rootFilter = new double[ihdnFunctions.length];
                     Arrays.fill(rootFilter, 1.0);
                 }
 
                 // set up Map for voteFunctions
                 if (cypherStatement != null) db.execute(cypherStatement);
-                HGC<T> thgc = new HGC<>(db, iterationsPerMonitor, iterationMonitor, rootFilter, hgFunctions, hgFunctionNames, voteFunctions);
+                IHDN ihdn = new IHDN(db, iterationsPerMonitor, iterationMonitor, rootFilter, ihdnFunctions, hgFunctionNames, voteFunctions);
                 if (graphBuilder != null) {
-                    graphBuilder.accept(thgc);
+                    graphBuilder.accept(ihdn);
                 }
 
                 // default vote
-                defaultVote = new double[hgFunctions.length];
+                defaultVote = new double[ihdnFunctions.length];
                 Arrays.fill(defaultVote, 0.0);
 
                 db.getAllNodes().stream()
                         .filter(node -> !node.hasProperty(Properties.VOTE))
                         .forEach(node -> node.setProperty(Properties.VOTE, defaultVote));
 
-                if (db.findNodes(HGLabels.ROOT).stream().count() == 0)
+                if (db.findNodes(IHDNLabels.ROOT).stream().count() == 0)
                     throw new RuntimeException("No ROOT nodes found.");
 
 
                 tx.success();
-                return thgc;
+                return ihdn;
             }
         }
     }

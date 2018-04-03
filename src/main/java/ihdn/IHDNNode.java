@@ -1,7 +1,6 @@
-package hgc;
+package ihdn;
 
 import org.neo4j.graphdb.*;
-import org.omg.PortableInterceptor.INACTIVE;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,47 +8,47 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Stream;
 
-public class HGNode implements Node {
+public class IHDNNode implements Node {
 
-    private final Logger log = LoggerFactory.getLogger(HGNode.class);
+    private final Logger log = LoggerFactory.getLogger(IHDNNode.class);
 
     private final Node node;
-    private final HGC HGC;
+    private final IHDN IHDN;
     private boolean isDeleted;
 
-    HGNode(HGC HGC, Node node) {
-        this.HGC = HGC;
+    IHDNNode(IHDN IHDN, Node node) {
+        this.IHDN = IHDN;
         this.node = node;
     }
 
-    public HGNode(HGC HGC) {
-        this.HGC = HGC;
-        this.node = HGC.getDB().createNode();
+    public IHDNNode(IHDN IHDN) {
+        this.IHDN = IHDN;
+        this.node = IHDN.getDB().createNode();
     }
 
     public boolean isDeleted() {
         return this.isDeleted;
     }
 
-    public HGNode(HGC HGC, Label... labels) {
-        this.HGC = HGC;
-        this.node = HGC.getDB().createNode(labels);
+    public IHDNNode(IHDN IHDN, Label... labels) {
+        this.IHDN = IHDN;
+        this.node = IHDN.getDB().createNode(labels);
     }
 
     public void setInactive() {
-        node.setProperty(Properties.TIME_INACTIVE, HGC.getCurrentIteration());
-        node.addLabel(HGLabels.INACTIVE);
+        node.setProperty(Properties.TIME_INACTIVE, IHDN.getCurrentIteration());
+        node.addLabel(IHDNLabels.INACTIVE);
     }
 
     public boolean isActive() {
-        return !hasLabel(HGLabels.INACTIVE);
+        return !hasLabel(IHDNLabels.INACTIVE);
     }
 
     public VoteFunction getVoteFunction() {
         if (node.hasProperty(Properties.VOTE_FUNCTION)) {
             String voteFunctionName = (String) node.getProperty(Properties.VOTE_FUNCTION);
-            if (HGC.getVoteFunctions().containsKey(voteFunctionName))
-                return (VoteFunction) HGC.getVoteFunctions().get(voteFunctionName);
+            if (IHDN.getVoteFunctions().containsKey(voteFunctionName))
+                return IHDN.getVoteFunctions().get(voteFunctionName);
             else
                 throw new RuntimeException("Vote function " + voteFunctionName + " not found.");
         } else {
@@ -62,7 +61,7 @@ public class HGNode implements Node {
         if (node.hasProperty(Properties.FILTER))
             filter = (double[]) node.getProperty(Properties.FILTER);
         else {
-            filter = new double[HGC.getNumFunctions()];
+            filter = new double[IHDN.getNumFunctions()];
             Arrays.fill(filter, 1.0);
         }
         return filter;
@@ -72,56 +71,56 @@ public class HGNode implements Node {
         return (double[]) getProperty(Properties.VOTE);
     }
 
-    public Stream<HGNode> getAllChildNodes() {
+    public Stream<IHDNNode> getAllChildNodes() {
         return ((ResourceIterator<Relationship>)
-                getRelationships(HGRelTypes.CONTAINS, Direction.OUTGOING).iterator()).stream()
+                getRelationships(IHDNRelTypes.CONTAINS, Direction.OUTGOING).iterator()).stream()
                 .map(Relationship::getEndNode)
-                .map(node1 -> new HGNode(HGC, node1));
+                .map(node1 -> new IHDNNode(IHDN, node1));
     }
 
-    public Stream<HGNode> getChildNodesWithLabel(Label label) {
+    public Stream<IHDNNode> getChildNodesWithLabel(Label label) {
         return getAllChildNodes().filter(hgNode -> hgNode.hasLabel(label));
     }
 
-    public Stream<HGNode> getAllParentNodes() {
+    public Stream<IHDNNode> getAllParentNodes() {
         return ((ResourceIterator<Relationship>)
-                getRelationships(HGRelTypes.CONTAINS, Direction.INCOMING).iterator()).stream()
+                getRelationships(IHDNRelTypes.CONTAINS, Direction.INCOMING).iterator()).stream()
                 .map(Relationship::getStartNode)
-                .map(node1 -> new HGNode(HGC, node1));
+                .map(node1 -> new IHDNNode(IHDN, node1));
     }
 
-    public HGNode shallowClone() {
-        HGNode hgNode = new HGNode(HGC);
-        for (Label label : getLabels()) hgNode.addLabel(label);
+    public IHDNNode shallowClone() {
+        IHDNNode ihdnNode = new IHDNNode(IHDN);
+        for (Label label : getLabels()) ihdnNode.addLabel(label);
 
         for (Map.Entry<String, Object> entry : getAllProperties().entrySet())
-            hgNode.setProperty(entry.getKey(), entry.getValue());
+            ihdnNode.setProperty(entry.getKey(), entry.getValue());
 
         getAllParentNodes()
-                .forEach(parent -> parent.createRelationshipTo(hgNode, HGRelTypes.CONTAINS));
+                .forEach(parent -> parent.createRelationshipTo(ihdnNode, IHDNRelTypes.CONTAINS));
 
-        return hgNode;
+        return ihdnNode;
     }
 
-    public HGNode deepClone() {
-        HGNode hgNode = this.shallowClone();
+    public IHDNNode deepClone() {
+        IHDNNode ihdnNode = this.shallowClone();
         getAllChildNodes()
-                .map(HGNode::deepClone)
+                .map(IHDNNode::deepClone)
                 .peek(child ->
                         ((ResourceIterator<Relationship>)
-                                getRelationships(main.HGC.rels.CONTAINS, Direction.OUTGOING).iterator()).stream()
+                                getRelationships(IHDNRelTypes.CONTAINS, Direction.OUTGOING).iterator()).stream()
                                 .filter(rel -> rel.getEndNode().equals(child))
                                 .forEach(Relationship::delete))
-                .forEach(child -> hgNode.createRelationshipTo(child, HGRelTypes.CONTAINS));
+                .forEach(child -> ihdnNode.createRelationshipTo(child, IHDNRelTypes.CONTAINS));
 
-        return hgNode;
+        return ihdnNode;
     }
 
     public String prettyPrint() {
         return String.format("(%d) -> [%s]",
                 getId(),
                 getAllChildNodes()
-                        .map(HGNode::getId)
+                        .map(IHDNNode::getId)
                         .map(Object::toString)
                         .reduce((s, s2) -> String.join(",", s, s2))
                         .orElse(""));
@@ -131,7 +130,7 @@ public class HGNode implements Node {
         return String.format("(%d) -> [%s]",
                 getId(),
                 getAllChildNodes()
-                        .map(HGNode::deepPrettyPrint)
+                        .map(IHDNNode::deepPrettyPrint)
                         .map(Object::toString)
                         .reduce((s, s2) -> String.join(",", s, s2))
                         .orElse(""));
@@ -152,7 +151,7 @@ public class HGNode implements Node {
     }
 
     public void recursiveDelete() {
-        getAllChildNodes().forEach(HGNode::recursiveDelete);
+        getAllChildNodes().forEach(IHDNNode::recursiveDelete);
         delete();
     }
 

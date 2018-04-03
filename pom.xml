@@ -18,12 +18,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.braintree</groupId>
-    <artifactId>hgc</artifactId>
+    <artifactId>IHDN</artifactId>
     <version>1.0.0-SNAPSHOT</version>
 
     <name>pete meltzer</name>
     <description>heirarchical graph computer</description>
-    <url>github.com/meltzerpete/hgc</url>
+    <url>github.com/meltzerpete/IHDN</url>
     <inceptionYear>2018</inceptionYear>
     <licenses>
         <license>
@@ -53,7 +53,6 @@
             <groupId>org.neo4j</groupId>
             <artifactId>neo4j</artifactId>
             <version>3.3.1</version>
-            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.neo4j</groupId>

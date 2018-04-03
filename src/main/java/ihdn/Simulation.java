@@ -1,4 +1,4 @@
-package hgc;
+package ihdn;
 
 public interface Simulation {
 }
